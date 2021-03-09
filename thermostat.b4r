@@ -1,0 +1,198 @@
+﻿Build1=Default,B4RDev
+Group=Default Group
+Library1=rcore
+Library2=rdht
+Library3=rliquidcrystal_i2c
+NumberOfFiles=0
+NumberOfLibraries=3
+NumberOfModules=0
+Version=3.7
+@EndOfDesignText@
+
+#Region Project Attributes
+	#AutoFlushLogs: True
+	#CheckArrayBounds: True
+	#StackBufferSize: 300
+#End Region
+#Region Project Attributes
+    #AutoFlushLogs: True
+    #CheckArrayBounds: True
+    #StackBufferSize: 300
+#End Region
+
+Sub Process_Globals
+	Public Serial1 As Serial
+
+	Private pinRed, pinGreen, pinBlue As Pin
+
+	Private DHT11pin As Pin
+	Private DHT11sensor As dht
+
+	Private RelayPin As Pin
+	Private HeaterON As Boolean
+
+	Private lcd As LiquidCrystal_I2C
+
+	Private triggerpin,	echopin As Pin
+
+	Dim pulsduration As ULong             'Pulse Width on Echo Pin (High to Low)
+	Dim distance As Double
+	Dim SendTriggerTimer As Timer
+	
+	Dim DisplayRow(2) As String
+
+	Private ColdButton As Pin
+	Private HotButton As Pin
+
+	Private Timer1 As Timer
+	
+	Public NotActiveCycles As Byte
+	Public temperature As Double
+	Public OptimalTemp As Double
+	
+End Sub
+
+Private Sub AppStart
+	Serial1.Initialize(115200)
+	Log("AppStart")
+	
+	OptimalTemp = 25
+	HeaterON = False
+	
+	pinRed.Initialize(2, pinRed.MODE_OUTPUT)			
+	pinGreen.Initialize(3, pinGreen.MODE_OUTPUT)	
+	pinBlue.Initialize(4, pinBlue.MODE_OUTPUT)
+	
+	DHT11pin.Initialize(5,DHT11pin.MODE_INPUT)	
+	RelayPin.Initialize(6, RelayPin.MODE_OUTPUT)
+
+	triggerpin.Initialize(9,triggerpin.MODE_OUTPUT)
+	echopin.Initialize(8,echopin.MODE_INPUT)
+	echopin.DigitalWrite(False)
+
+	SendTriggerTimer.Initialize("SendTriggerTimer_Tick", 1000) 		'ms
+	SendTriggerTimer.Enabled = True
+
+	Timer1.Initialize("Timer1_Tick", 2000)
+	Timer1.Enabled=True
+	
+    ColdButton.Initialize(ColdButton.A1, ColdButton.MODE_INPUT_PULLUP)
+    ColdButton.AddListener("COLD_StateChanged")
+    HotButton.Initialize(HotButton.A0, HotButton.MODE_INPUT_PULLUP)
+	HotButton.AddListener("HOT_StateChanged")
+
+	Delay(2000)
+
+	DHT11sensor.Read11(DHT11pin.PinNumber)
+	temperature = DHT11sensor.GetTemperature
+	
+	lcd.Initialize(0x27, 16, 2)
+	lcd.Clear
+
+	DisplayRow(0) = JoinStrings(Array As String("Temp: ", temperature, " C"))
+	DisplayRow(1) = JoinStrings(Array As String("Comfort: ", OptimalTemp, " C"))
+	WriteDisplay(DisplayRow(0), DisplayRow(1))
+
+	NotActiveCycles = 0
+	
+End Sub
+
+Sub Timer1_Tick
+	DHT11sensor.Read11(DHT11pin.PinNumber)    
+	temperature = DHT11sensor.GetTemperature
+	NotActiveCycles = NotActiveCycles + 1
+	
+    If temperature < OptimalTemp Then			' Cold
+		pinRed.DigitalWrite(False)
+		pinGreen.DigitalWrite(False)
+		pinBlue.Digitalwrite(True)
+		If HeaterON = False Then
+			RelayPin.DigitalWrite(True)
+			HeaterON = True
+			NotActiveCycles = 0
+			Log("Heater ON")
+		End If
+				
+	Else If temperature = OptimalTemp Then		' Cozy
+		pinRed.DigitalWrite(False)
+		pinGreen.DigitalWrite(True)
+		pinBlue.Digitalwrite(False)
+		
+	Else if temperature > OptimalTemp Then		' Hot
+		pinRed.DigitalWrite(True)
+		pinGreen.DigitalWrite(False)
+		pinBlue.Digitalwrite(False)
+		If HeaterON = True Then
+			RelayPin.DigitalWrite(False)
+			HeaterON = False
+			NotActiveCycles = 0
+			Log("Heater OFF")
+		End If		
+	Else
+		pinRed.DigitalWrite(False)
+		pinGreen.DigitalWrite(False)
+		pinBlue.Digitalwrite(False)
+	End If
+	
+	If NotActiveCycles > 3 Then
+		lcd.Backlight = False	
+	End If
+	
+	If NotActiveCycles > 50 Then
+		NotActiveCycles = 5
+	End If
+	
+End Sub
+
+Sub COLD_StateChanged (State As Boolean)
+	If State = True Then
+		OptimalTemp = OptimalTemp - 1
+		DisplayRow(0) = JoinStrings(Array As String("Temp: ", temperature, " C"))
+		DisplayRow(1) = JoinStrings(Array As String("Comfort: ", OptimalTemp, " C"))
+		WriteDisplay(DisplayRow(0), DisplayRow(1))
+		NotActiveCycles = 0
+	End If
+End Sub
+
+Sub HOT_StateChanged (State As Boolean)
+	If State = True Then
+		OptimalTemp = OptimalTemp + 1
+		DisplayRow(0) = JoinStrings(Array As String("Temp: ", temperature, " C"))
+		DisplayRow(1) = JoinStrings(Array As String("Comfort: ", OptimalTemp, " C"))
+		WriteDisplay(DisplayRow(0), DisplayRow(1))
+		NotActiveCycles = 0
+	End If
+End Sub
+
+Sub WriteDisplay(row1 As String, row2 As String)
+	lcd.Backlight = True
+	lcd.SetCursor(0,0)
+	lcd.Write(row1)
+	lcd.SetCursor(0,1)
+	lcd.Write(row2)
+End Sub
+
+Sub SendTriggerTimer_Tick
+
+	triggerpin.DigitalWrite(True)
+	triggerpin.DigitalWrite(False)
+  
+	RunNative("pulseins",echopin.PinNumber)
+	distance=(0.5*pulsduration)/29.1
+    
+	If (distance< 30) And (distance>2) Then
+		DisplayRow(0) = JoinStrings(Array As String("Temp: ", temperature, " C"))
+		DisplayRow(1) = JoinStrings(Array As String("Comfort: ", OptimalTemp, " C"))
+		WriteDisplay(DisplayRow(0), DisplayRow(1))
+		NotActiveCycles = 0
+		Log("Distance Sensor TRUE")
+	End If
+ 
+ End Sub
+
+
+#if C
+void pulseins (B4R::Object* o) {
+   b4r_main::_pulsduration = pulseIn(o->toULong(),HIGH);
+}
+#End if
