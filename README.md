@@ -11,3 +11,6 @@ Feature list:
 - Relay is switching on when current temp is below Comfort, turns off when above comfort.
 
 See it working on Youtube: https://www.youtube.com/watch?v=Ny1QYJJFJws
+
+
+![alt text](thermostat_bb.png)
